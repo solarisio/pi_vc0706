@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"time"
@@ -15,65 +14,6 @@ import (
 )
 
 type SerialIO io.ReadWriteCloser
-
-const (
-	PORT              = "/dev/ttyAMA0"
-	BAUD              = 38400
-	SERIAL_NUM        = 0x00
-	BUFFER_CHUNK_SIZE = uint32(256) // bytes
-
-	CMD_END                  = 0x00
-	CMD_GET_VERSION          = 0x11
-	CMD_SET_SERIAL_NUMBER    = 0x21
-	CMD_SET_PORT             = 0x24
-	CMD_SYSTEM_RESET         = 0x26
-	CMD_READ_DATA            = 0x30
-	CMD_WRITE_DATA           = 0x31
-	CMD_READ_BUF             = 0x32
-	CMD_GET_BUF_LEN          = 0x34
-	CMD_TAKE_PHOTO           = 0x36
-	CMD_COMM_MOTION_CTRL     = 0x37
-	CMD_COMM_MOTION_STATUS   = 0x38
-	CMD_COMM_MOTION_DETECTED = 0x39
-	CMD_MOTION_CTRL          = 0x42
-	CMD_MOTION_STATUS        = 0x43
-	CMD_TVOUT_CTRL           = 0x44
-	CMD_OSD_ADD_CHAR         = 0x45
-	CMD_SET_ZOOM             = 0x52
-	CMD_GET_ZOOM             = 0x53
-	CMD_DOWNSIZE_CTRL        = 0x54
-	CMD_DOWNSIZE_STATUS      = 0x55
-	CMD_SEND                 = 0x56
-	CMD_REPLY                = 0x76
-
-	STOP_CURRENT_FRAME = 0x00
-	STOP_NEXT_FRAME    = 0x01
-	RESUME_FRAME       = 0x02
-	STEP_FRAME         = 0x03
-
-	MOTION_CONTROL  = 0x00
-	UART_MOTION     = 0x01
-	ACTIVATE_MOTION = 0x01
-
-	// Status:
-	// 0: successful; 1: doesn't receive the cmd; 2: data length error;
-	// 3:data format error; 4: cmd cannot exec now; 5: cmd received but
-	// exec wrong
-	STATUS_SUCCESS        = 0x00
-	STATUS_NOT_RECEIVED   = 0x01
-	STATUS_DATA_LEN_ERROR = 0x02
-	STATUS_DATA_FMT_ERROR = 0x03
-	STATUS_CMD_NOT_EXEC   = 0x04
-	STATUS_CMD_EXEC_ERROR = 0x05
-
-	// data transfer mode
-	MCU_MODE = 0x0A
-	DMA_MODE = 0x0F
-
-	IMAGE_SIZE_LARGE  = 0x00
-	IMAGE_SIZE_MEDIUM = 0x11
-	IMAGE_SIZE_SMALL  = 0x22
-)
 
 var (
 	EMPTY_DATA = []byte{}
@@ -161,11 +101,6 @@ func RunCmd(s SerialIO, cmd []byte, length uint32, ms int) (buf []byte, err erro
 		return
 	}
 	buf = buf[:n]
-
-	fmt.Println("given length", length, ", read", n)
-
-	fmt.Println("Send cmd: " + hex.EncodeToString(cmd))
-	fmt.Println("Receive cmd: " + hex.EncodeToString(buf))
 	err = CheckReply(cmd[2], buf)
 	if err != nil {
 		glog.Warning(err)
@@ -188,6 +123,20 @@ func SetPhotoSize(s SerialIO, sz string) (err error) {
 	return
 }
 
+// register address: 0x12 0x04
+func SetCompression(s SerialIO, rate byte) (err error) {
+	data := []byte{DEVICE_TYPE_CHIP_REGISTER, 0x01, 0x12, 0x04, rate}
+	cmd := MakeSendCmd(CMD_WRITE_DATA, 0x05, data)
+	_, err = RunCmd(s, cmd, 5, 10)
+	return
+}
+
+func SetColorMode(s SerialIO, ctrlMode, showMode byte) (err error) {
+	cmd := MakeSendCmd(CMD_COLOR_CTRL, 0x02, []byte{ctrlMode, showMode})
+	_, err = RunCmd(s, cmd, 5, 10)
+	return
+}
+
 func InitCamera() (s SerialIO, err error) {
 	c := &serial.Config{Name: PORT, Baud: BAUD}
 	s, err = serial.OpenPort(c)
@@ -200,16 +149,19 @@ func InitCamera() (s SerialIO, err error) {
 		glog.Fatal(err)
 		return
 	}
-	version, err := GetVersion(s)
-	if err != nil {
-		glog.Fatal(err)
-		return
-	}
-	glog.Infoln("Camera version " + version)
-	glog.Infoln("Set photo size")
-	if err = SetPhotoSize(s, "l"); err != nil {
-		glog.Warning(err)
-	}
+	// version, err := GetVersion(s)
+	// if err != nil {
+	// 	glog.Fatal(err)
+	// 	return
+	// }
+	// glog.Infoln("Camera version " + version)
+	// glog.Infoln("Set photo size")
+	// if err = SetPhotoSize(s, "m"); err != nil {
+	// 	glog.Warning(err)
+	// }
+	// if err = SetColorMode(s, COLOR_CTRL_MODE_GPIO, COLOR_SHOW_MODE_COLOR); err != nil {
+	// 	glog.Warning(err)
+	// }
 	return
 }
 
@@ -244,7 +196,6 @@ func VerifyFrame(buf []byte) (err error) {
 func ReadBuffer(s SerialIO) (buf []byte, err error) {
 	length, err := GetBufferLen(s)
 	if err != nil {
-		fmt.Println("err: " + err.Error())
 		glog.Warning(err)
 		return
 	}
@@ -257,7 +208,6 @@ func ReadBuffer(s SerialIO) (buf []byte, err error) {
 	frame := []byte{}
 	retry := 0
 	for start := uint32(0); start < length; start += BUFFER_CHUNK_SIZE {
-		fmt.Println("start", start, "length", length)
 		if start > length {
 			frameLen = start - length
 			binary.BigEndian.PutUint32(frameLenBuf, frameLen)
@@ -265,9 +215,7 @@ func ReadBuffer(s SerialIO) (buf []byte, err error) {
 		offset := make([]byte, 4)
 		binary.BigEndian.PutUint32(offset, start)
 		data = append(append(append(mode, offset...), frameLenBuf...), delay...)
-		fmt.Println("data: " + hex.EncodeToString(data))
 		cmd := MakeSendCmd(CMD_READ_BUF, 0x0C, data)
-		fmt.Println("read buf: " + hex.EncodeToString(cmd))
 		frame, err = RunCmd(s, cmd, 5+frameLen+5, 500)
 		if err != nil {
 			glog.Warning(err)
