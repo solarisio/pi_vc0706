@@ -53,8 +53,8 @@ func MakeSimpleReplyCmd(c byte) (cmd []byte) {
 	return
 }
 
-// Check the reply to make sure the command executes successfully
-// Only check the first byte (reply), 3rd byte (command), the status
+// Check the reply to make sure the command executes successfully.
+// Only check the first byte (reply), serial number, action, and status.
 func CheckReply(c byte, r []byte) (err error) {
 	switch {
 	case r[0] != CMD_REPLY:
@@ -104,14 +104,12 @@ func RunCmd(s SerialIO, cmd []byte, length uint32, ms int) (buf []byte, err erro
 	err = CheckReply(cmd[2], buf)
 	if err != nil {
 		glog.Warning(err)
+		return
 	}
 	return
 }
 
 // Default: medium (320x240)
-// Command format: 0x56 + serial number + 0x31 + 0x05 + 0x04 + 0x01 + 0x00 +
-// 0x19 + size
-// Return format: 0x76 + serial number + 0x31 + 0x00 + 0x00
 func SetPhotoSize(s SerialIO, sz string) (err error) {
 	size, ok := IMAGE_SIZES[sz]
 	if !ok {
@@ -123,7 +121,7 @@ func SetPhotoSize(s SerialIO, sz string) (err error) {
 	return
 }
 
-// register address: 0x12 0x04
+// Register address: 0x12 0x04
 func SetCompression(s SerialIO, rate byte) (err error) {
 	data := []byte{DEVICE_TYPE_CHIP_REGISTER, 0x01, 0x12, 0x04, rate}
 	cmd := MakeSendCmd(CMD_WRITE_DATA, 0x05, data)
@@ -134,6 +132,16 @@ func SetCompression(s SerialIO, rate byte) (err error) {
 func SetColorMode(s SerialIO, ctrlMode, showMode byte) (err error) {
 	cmd := MakeSendCmd(CMD_COLOR_CTRL, 0x02, []byte{ctrlMode, showMode})
 	_, err = RunCmd(s, cmd, 5, 10)
+	return
+}
+
+func GetColorMode(s SerialIO) (ctrlMode, showMode, color byte, err error) {
+	cmd := MakeSimpleSendCmd(CMD_COLOR_STATUS)
+	buf, err := RunCmd(s, cmd, 8, 10)
+	if err != nil {
+		return
+	}
+	ctrlMode, showMode, color = buf[5], buf[6], buf[7]
 	return
 }
 
@@ -149,6 +157,11 @@ func InitCamera() (s SerialIO, err error) {
 		glog.Fatal(err)
 		return
 	}
+
+	// if err = SetCompression(s, 0x4B); err != nil {
+	// 	glog.Warning(err)
+	// 	return
+	// }
 	// version, err := GetVersion(s)
 	// if err != nil {
 	// 	glog.Fatal(err)
@@ -218,7 +231,6 @@ func ReadBuffer(s SerialIO) (buf []byte, err error) {
 		cmd := MakeSendCmd(CMD_READ_BUF, 0x0C, data)
 		frame, err = RunCmd(s, cmd, 5+frameLen+5, 500)
 		if err != nil {
-			glog.Warning(err)
 			return
 		}
 		if err = VerifyFrame(frame); err != nil {
@@ -243,10 +255,14 @@ func ReadBuffer(s SerialIO) (buf []byte, err error) {
 func TakePhoto(s SerialIO) (buf []byte, err error) {
 	cmd := MakeSendCmd(CMD_TAKE_PHOTO, 0x01, []byte{STOP_CURRENT_FRAME})
 	if _, err = RunCmd(s, cmd, 5, 5000); err != nil {
-		glog.Warning(err)
 		return
 	}
 	buf, err = ReadBuffer(s)
+
+	cmd = MakeSendCmd(CMD_TAKE_PHOTO, 0x01, []byte{RESUME_FRAME})
+	if _, err = RunCmd(s, cmd, 5, 10); err != nil {
+		return
+	}
 	return
 }
 
