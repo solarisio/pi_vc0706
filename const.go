@@ -2,7 +2,7 @@ package vc0706
 
 const (
 	PORT              = "/dev/ttyAMA0"
-	BAUD              = 38400
+	BAUD              = 57600
 	SERIAL_NUM        = 0x00
 	BUFFER_CHUNK_SIZE = uint32(256) // bytes
 

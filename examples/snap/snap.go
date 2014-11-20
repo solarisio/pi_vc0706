@@ -1,10 +1,4 @@
-# VC0706 Camera
-
-Golang driver for Adafruit TTL JPEG Camera, VC0706.
-
-Example:
-
-```go
+package main
 
 import (
 	"fmt"
@@ -30,13 +24,4 @@ func main() {
 	if err = vc0706.SaveBuffer("test.jpg", buf); err != nil {
 		glog.Warning(err)
 	}
-
 }
-
-```
-
-## Protocol references:
-
-1. http://read.pudn.com/downloads155/ebook/687043/VC0703.pdf
-2. http://www.adafruit.com/datasheets/VC0706protocol.pdf
-3. http://www.adafruit.com/datasheets/PTC08.pdf
